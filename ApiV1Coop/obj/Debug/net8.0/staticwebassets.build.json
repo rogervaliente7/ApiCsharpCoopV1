@@ -1,0 +1,12 @@
+{
+  "Version": 1,
+  "Hash": "GPADD9aFdG9q/mB7DeT2Z4iMu8+kGL2AQzANfLvmM98=",
+  "Source": "ApiV1Coop",
+  "BasePath": "_content/ApiV1Coop",
+  "Mode": "Default",
+  "ManifestType": "Build",
+  "ReferencedProjectsConfiguration": [],
+  "DiscoveryPatterns": [],
+  "Assets": [],
+  "Endpoints": []
+}

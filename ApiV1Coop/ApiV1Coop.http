@@ -1,0 +1,6 @@
+@ApiV1Coop_HostAddress = http://localhost:5016
+
+GET {{ApiV1Coop_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
