@@ -5,7 +5,6 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
-using System;
 
 namespace ApiV1Coop.Controllers.auth
 {
@@ -18,42 +17,58 @@ namespace ApiV1Coop.Controllers.auth
         private readonly string _googleClientId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID") ?? "default-google-client-id"; // Client ID de Google
 
         [HttpPost("google")]
-        public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest request)
+        public async Task<IActionResult> GoogleLogin()
         {
-            if (string.IsNullOrEmpty(request?.Token))
+            // Obtener el token del encabezado Authorization
+            var authorizationHeader = Request.Headers["Authorization"].ToString();
+
+            if (string.IsNullOrEmpty(authorizationHeader) || !authorizationHeader.StartsWith("Bearer "))
             {
-                return BadRequest(new { error = "El token de Google es requerido." });
+                return BadRequest(new { error = "El encabezado Authorization es requerido y debe contener el token de Google." });
             }
+
+            // Extraer el token después de "Bearer "
+            var googleToken = authorizationHeader.Substring("Bearer ".Length).Trim();
 
             try
             {
                 // Verificar el token con Google
-                var payload = await VerifyGoogleToken(request.Token);
+                var payload = await VerifyGoogleToken(googleToken);
                 if (payload == null)
                 {
                     return Unauthorized(new { error = "Token de Google inválido." });
                 }
 
-                // Aquí simulas almacenar el usuario (puedes guardarlo en una base de datos)
-                var user = new
+                // Aquí simulas los datos quemados
+                var response = new
                 {
-                    GoogleId = payload.Subject,
-                    Name = payload.Name,
-                    Email = payload.Email,
-                    Picture = payload.Picture
+                    data = new[]
+                    {
+                        new
+                        {
+                            type = "usuarios",
+                            id = "123456789", // ID quemado
+                            attributes = new
+                            {
+                                usuario_id = "123456789", // ID quemado
+                                googleId = payload.Subject,
+                                name = payload.Name,
+                                email = payload.Email,
+                                picture = payload.Picture,
+                                token = GenerateJwtToken(payload.Subject, payload.Email) // Generar el token JWT
+                            }
+                        }
+                    }
                 };
 
-                // Generar JWT
-                var jwtToken = GenerateJwtToken(user.GoogleId, user.Email);
-
-                // Retornar el JWT al frontend
-                return Ok(new { message = "Usuario guardado", token = jwtToken });
+                return Ok(response);
             }
             catch (Exception ex)
             {
                 return BadRequest(new { error = ex.Message });
             }
         }
+
 
         [HttpGet("test")]
         public IActionResult TestConnection()
@@ -99,10 +114,5 @@ namespace ApiV1Coop.Controllers.auth
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
-    }
-
-    public class GoogleLoginRequest
-    {
-        public string? Token { get; set; }
     }
 }

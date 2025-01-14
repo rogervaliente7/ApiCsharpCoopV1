@@ -10,7 +10,19 @@ var builder = WebApplication.CreateBuilder(args);
 Env.Load();
 
 Console.WriteLine("JWT_SECRET: " + Environment.GetEnvironmentVariable("JWT_SECRET"));
-// Configuraci�n de JWT Bearer
+
+// Configuración de CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend", policy =>
+    {
+        policy.WithOrigins("http://localhost:4200") // Dominio del frontend
+              .AllowAnyHeader() // Permitir cualquier encabezado
+              .AllowAnyMethod(); // Permitir cualquier método HTTP (GET, POST, etc.)
+    });
+});
+
+// Configuración de JWT Bearer
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -27,12 +39,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-
 builder.Services.AddControllers();
 
 var app = builder.Build();
 
-app.UseAuthentication(); // Habilitar autenticaci�n JWT
+// Aplicar la política de CORS antes de autenticación y autorización
+app.UseCors("AllowFrontend");
+
+app.UseAuthentication(); // Habilitar autenticación JWT
 app.UseAuthorization();
 
 app.MapControllers();
