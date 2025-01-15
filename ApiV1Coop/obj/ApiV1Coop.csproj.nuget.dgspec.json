@@ -1,23 +1,23 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\Usuario\\source\\repos\\ApiV1Coop\\ApiV1Coop\\ApiV1Coop.csproj": {}
+    "C:\\Users\\AcavenDeRL\\Documents\\projects\\csharp\\ApiCsharpCoopV1\\ApiV1Coop\\ApiV1Coop.csproj": {}
   },
   "projects": {
-    "C:\\Users\\Usuario\\source\\repos\\ApiV1Coop\\ApiV1Coop\\ApiV1Coop.csproj": {
+    "C:\\Users\\AcavenDeRL\\Documents\\projects\\csharp\\ApiCsharpCoopV1\\ApiV1Coop\\ApiV1Coop.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\Usuario\\source\\repos\\ApiV1Coop\\ApiV1Coop\\ApiV1Coop.csproj",
+        "projectUniqueName": "C:\\Users\\AcavenDeRL\\Documents\\projects\\csharp\\ApiCsharpCoopV1\\ApiV1Coop\\ApiV1Coop.csproj",
         "projectName": "ApiV1Coop",
-        "projectPath": "C:\\Users\\Usuario\\source\\repos\\ApiV1Coop\\ApiV1Coop\\ApiV1Coop.csproj",
-        "packagesPath": "C:\\Users\\Usuario\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\Usuario\\source\\repos\\ApiV1Coop\\ApiV1Coop\\obj\\",
+        "projectPath": "C:\\Users\\AcavenDeRL\\Documents\\projects\\csharp\\ApiCsharpCoopV1\\ApiV1Coop\\ApiV1Coop.csproj",
+        "packagesPath": "C:\\Users\\AcavenDeRL\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\AcavenDeRL\\Documents\\projects\\csharp\\ApiCsharpCoopV1\\ApiV1Coop\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
         ],
         "configFilePaths": [
-          "C:\\Users\\Usuario\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Users\\AcavenDeRL\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
@@ -62,6 +62,16 @@
               "target": "Package",
               "version": "[8.0.0, )"
             },
+            "Microsoft.EntityFrameworkCore.SqlServer": {
+              "target": "Package",
+              "version": "[9.0.1, )"
+            },
+            "Microsoft.EntityFrameworkCore.Tools": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[9.0.1, )"
+            },
             "Swashbuckle.AspNetCore": {
               "target": "Package",
               "version": "[6.6.2, )"
@@ -90,7 +100,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.101/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.102/PortableRuntimeIdentifierGraph.json"
         }
       }
     }
