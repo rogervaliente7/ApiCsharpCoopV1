@@ -377,10 +377,10 @@ namespace ApiV1Coop.Controllers.auth
                     var expirationTime = reader["ExpirationTime"] as DateTime?;
 
                     // Verificar si la sesión ha expirado
-                    if (expirationTime.HasValue && expirationTime.Value < TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"))
-                    {
-                        return Unauthorized(new { error = "El token de sesión ha expirado." });
-                    }
+                    // if (expirationTime.HasValue && expirationTime.Value < TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"))
+                    // {
+                    //     return Unauthorized(new { error = "El token de sesión ha expirado." });
+                    // }
 
                     // Validar si el usuario ha sido verificado
                     var isValidated = reader["is_validated"] as bool? ?? false;
@@ -416,7 +416,7 @@ namespace ApiV1Coop.Controllers.auth
                     var sessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
                     sessionCommand.CommandText = sessionQuery;
                     sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@createdAt", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador")));
-                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@expirationTime", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddMinutes(1), "America/El_Salvador")));
+                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@expirationTime", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddHours(1), "America/El_Salvador")));
                     sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", sessionToken));
                     sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@userId", foundUser.Id));
 

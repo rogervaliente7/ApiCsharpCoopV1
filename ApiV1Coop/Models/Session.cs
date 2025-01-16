@@ -4,7 +4,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ApiV1Coop.Models
 {
-    public class Session
+    public class Session // Model
     {
         public int Id { get; set; }  // Identificador único para la sesión
         public int UserId { get; set; }  // Relación con el usuario (foreign key)

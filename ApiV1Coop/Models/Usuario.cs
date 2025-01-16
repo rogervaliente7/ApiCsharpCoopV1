@@ -2,9 +2,9 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
-namespace ApiV1Coop.Models
+namespace ApiV1Coop.Models 
 {
-    public class Usuario
+    public class Usuario // Model
     {
         [Key]
         public int Id { get; set; }
