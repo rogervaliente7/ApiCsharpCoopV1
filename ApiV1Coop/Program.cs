@@ -31,7 +31,7 @@ builder.Services.AddCors(options =>
 //     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer("Server=localhost;Database=prueba_db;Trusted_Connection=True;TrustServerCertificate=True;"));
+    options.UseSqlServer("Server=localhost;Database=prueba_db;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True;"));
 
 // Configuración de JWT Bearer
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

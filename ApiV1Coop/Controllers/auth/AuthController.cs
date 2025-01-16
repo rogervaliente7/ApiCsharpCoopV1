@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using ApiV1Coop.Models;
 using Microsoft.EntityFrameworkCore;
+using System.Data.SqlClient;
+using Microsoft.Data.SqlClient;
 
 namespace ApiV1Coop.Controllers.auth
 {
@@ -181,14 +183,10 @@ namespace ApiV1Coop.Controllers.auth
 
             try
             {
-                // Imprimir el contenido del request
-                Console.WriteLine("JwtToken recibido: " + request.JwtToken);
-                Console.WriteLine("OptCode recibido: " + request.OptCode);
-
                 // Consulta SQL personalizada usando FromSqlRaw
                 var query = @"
                     SELECT TOP(1) [u].[Id], [u].[correo], [u].[google_token], [u].[is_validated], [u].[jwt_token], 
-                        [u].[nombre], [u].[password], [u].[picture]
+                                [u].[nombre], [u].[password], [u].[picture]
                     FROM [Usuarios] AS [u]
                     WHERE [u].[jwt_token] = {0}";
 
@@ -201,23 +199,37 @@ namespace ApiV1Coop.Controllers.auth
                     return BadRequest(new { error = "Usuario no encontrado o ya validado." });
                 }
 
-                // Imprimir el query generado con el parámetro JwtToken
-                Console.WriteLine("User encontrado: " + found_user);
-
                 // Actualizar el campo is_validated
                 found_user.IsValidated = true;
                 _dbContext.Usuarios.Update(found_user);
                 await _dbContext.SaveChangesAsync();
 
-                return Ok(new { 
+                // Crear una nueva sesión para el usuario
+                var sessionToken = Guid.NewGuid().ToString();  // Generar un token único para la sesión
+                var expirationTime = DateTime.UtcNow.AddHours(1);  // La sesión expira en 1 hora (ajustable)
+
+                var session = new Session
+                {
+                    UserId = found_user.Id,
+                    SessionToken = sessionToken,
+                    ExpirationTime = expirationTime
+                };
+                
+                _dbContext.Sessions.Add(session);
+                await _dbContext.SaveChangesAsync();
+
+                return Ok(new 
+                { 
                     message = "Usuario validado exitosamente.",
+                    session_token = session.SessionToken,
+                    expiration_time = session.ExpirationTime,
                     user = new
                     {
                         id = found_user.Id,
                         name = found_user.Nombre,
                         email = found_user.Correo,
-                        opt_code = 123123,
-                        is_validated = false
+                        opt_code = 123123,  // Aquí puedes asignar un código de validación si lo deseas
+                        is_validated = found_user.IsValidated
                     }
                 });
             }
@@ -237,62 +249,206 @@ namespace ApiV1Coop.Controllers.auth
 
             try
             {
-                // Imprimir el contenido del request
-                Console.WriteLine("JwtToken recibido: " + request.JwtToken);
-                Console.WriteLine("Password recibido: " + request.Password);
-
-                // Consultar al usuario con el jwtToken
-                // var found_user = await _dbContext.Usuarios
-                //     .Where(u => u.JwtToken == request.JwtToken && u.Password != null)
-                //     .FirstOrDefaultAsync();
-
-
+                // Consulta SQL para encontrar al usuario con jwtToken y que la contraseña aún sea NULL
                 var query = @"
                     SELECT TOP(1) [u].[Id], [u].[correo], [u].[google_token], [u].[is_validated], [u].[jwt_token], 
                                 [u].[nombre], [u].[password], [u].[picture]
                     FROM [Usuarios] AS [u]
                     WHERE [u].[jwt_token] = {0} AND [u].[password] IS NULL";
 
-
                 var found_user = await _dbContext.Usuarios
                     .FromSqlRaw(query, request.JwtToken)
                     .FirstOrDefaultAsync();
-              
+
                 if (found_user == null)
                 {
-                    return BadRequest(new { error = "Usuario no encontrado o no tiene contraseña definida." });
+                    return BadRequest(new { error = "Usuario no encontrado o ya tiene una contraseña configurada." });
                 }
 
-                // Validar la contraseña, en un caso real aquí puedes comparar la contraseña de forma segura con un hash
-                if (found_user.Password != request.Password)  // Comparación simple, en producción deberías usar un hash
-                {
-                    return BadRequest(new { error = "Contraseña incorrecta." });
-                }
-
-                // Actualizar el estado de validación
+                // Asignar la nueva contraseña
+                found_user.Password = request.Password;
                 found_user.IsValidated = true;
+
+                // Actualizar el usuario en la base de datos
                 _dbContext.Usuarios.Update(found_user);
                 await _dbContext.SaveChangesAsync();
 
-                return Ok(new { 
-                    message = "Usuario validado exitosamente.",
+                // Crear una nueva sesión para el usuario
+                var sessionToken = Guid.NewGuid().ToString();  // Generar un token único para la sesión
+                var expirationTime = DateTime.UtcNow.AddHours(1);  // La sesión expira en 1 hora (ajustable)
+
+                var session = new Session
+                {
+                    UserId = found_user.Id,
+                    SessionToken = sessionToken,
+                    ExpirationTime = expirationTime
+                };
+
+                _dbContext.Sessions.Add(session);
+                await _dbContext.SaveChangesAsync();
+
+                return Ok(new 
+                { 
+                    message = "Usuario validado y contraseña asignada exitosamente.",
+                    session_token = session.SessionToken,
+                    expiration_time = session.ExpirationTime,
                     user = new
                     {
                         id = found_user.Id,
                         name = found_user.Nombre,
                         email = found_user.Correo,
-                        opt_code = 123123,
-                        is_validated = false
+                        opt_code = 123123,  // Aquí puedes asignar un código de validación si lo deseas
+                        is_validated = found_user.IsValidated
                     }
                 });
             }
             catch (Exception ex)
             {
-                // Manejar excepciones generales
                 return BadRequest(new { error = ex.Message });
             }
         }
 
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        {
+            // Validar que ambos parámetros están presentes
+            if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
+            {
+                return BadRequest(new { error = "El correo y la contraseña son obligatorios." });
+            }
+
+            try
+            {
+                // Imprimir el contenido del request para depuración
+                Console.WriteLine("Correo recibido: " + request.Email);
+                Console.WriteLine("Contraseña recibida: " + request.Password);
+
+                // Consulta SQL para verificar si ya hay una sesión activa
+                var checkSessionQuery = @"
+                    SELECT TOP(1) [SessionToken]
+                    FROM [Sessions]
+                    WHERE [UserId] = (SELECT [Id] FROM [Usuarios] WHERE [correo] = @correo)
+                    AND [ExpirationTime] > @currentTime";
+
+                var checkSessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
+                checkSessionCommand.CommandText = checkSessionQuery;
+                checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@correo", request.Email));
+                checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@currentTime", DateTime.UtcNow));
+
+                // Abrir la conexión de base de datos
+                if (checkSessionCommand.Connection.State != System.Data.ConnectionState.Open)
+                {
+                    await checkSessionCommand.Connection.OpenAsync();
+                }
+
+                // Ejecutar la consulta de sesión activa
+                var sessionReader = await checkSessionCommand.ExecuteReaderAsync();
+                if (await sessionReader.ReadAsync())
+                {
+                    return BadRequest(new { error = "El usuario ya tiene una sesión activa." });
+                }
+
+                // Consulta SQL para validar el usuario con el correo y la contraseña
+                var query = @"
+                    SELECT TOP(1) [u].[Id], [u].[correo], [u].[google_token], [u].[is_validated], [u].[jwt_token], 
+                                [u].[nombre], [u].[password], [u].[picture], s.[ExpirationTime]
+                    FROM [Usuarios] AS [u]
+                    LEFT JOIN [Sessions] AS s ON s.[UserId] = u.[Id]
+                    WHERE [u].[correo] = @correo AND [u].[password] = @password";
+
+                var command = _dbContext.Database.GetDbConnection().CreateCommand();
+                command.CommandText = query;
+
+                // Agregar parámetros para evitar inyecciones SQL
+                command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@correo", request.Email));
+                command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@password", request.Password));
+
+                // Abrir la conexión de base de datos
+                if (command.Connection.State != System.Data.ConnectionState.Open)
+                {
+                    await command.Connection.OpenAsync();
+                }
+
+                // Ejecutar la consulta y leer el resultado
+                var reader = await command.ExecuteReaderAsync();
+
+                if (await reader.ReadAsync())
+                {
+                    var expirationTime = reader["ExpirationTime"] as DateTime?;
+
+                    // Verificar si la sesión ha expirado
+                    if (expirationTime.HasValue && expirationTime.Value < TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"))
+                    {
+                        return Unauthorized(new { error = "El token de sesión ha expirado." });
+                    }
+
+                    // Validar si el usuario ha sido verificado
+                    var isValidated = reader["is_validated"] as bool? ?? false;
+                    if (!isValidated)
+                    {
+                        return Unauthorized(new { error = "El usuario no ha sido validado." });
+                    }
+
+                    // Obtener los datos del usuario
+                    var foundUser = new
+                    {
+                        Id = reader["Id"],
+                        Correo = reader["correo"],
+                        GoogleToken = reader["google_token"],
+                        IsValidated = isValidated,
+                        JwtToken = reader["jwt_token"],
+                        Nombre = reader["nombre"],
+                        Password = reader["password"],
+                        Picture = reader["picture"]
+                    };
+
+                    Console.WriteLine("USUARIO ENCONTRADO: " + foundUser);
+
+                    // Aquí puedes generar un token de sesión nuevo, si es necesario
+                    var sessionToken = Guid.NewGuid().ToString();
+                    var expirationTimeNew = DateTime.UtcNow.AddMinutes(1); // Para pruebas: el token expira en 1 minuto
+
+                    // Crear una nueva sesión en la base de datos
+                    var sessionQuery = @"
+                        INSERT INTO [Sessions] ([CreatedAt], [ExpirationTime], [SessionToken], [UserId])
+                        VALUES (@createdAt, @expirationTime, @sessionToken, @userId)";
+
+                    var sessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
+                    sessionCommand.CommandText = sessionQuery;
+                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@createdAt", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador")));
+                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@expirationTime", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddMinutes(1), "America/El_Salvador")));
+                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", sessionToken));
+                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@userId", foundUser.Id));
+
+                    await sessionCommand.ExecuteNonQueryAsync();
+
+                    return Ok(new
+                    {
+                        message = "Usuario validado y sesión creada exitosamente.",
+                        session_token = sessionToken,
+                        expiration_time = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddMinutes(1), "America/El_Salvador"),
+                        user = new
+                        {
+                            id = foundUser.Id,
+                            nombre = foundUser.Nombre,
+                            correo = foundUser.Correo,
+                            is_validated = foundUser.IsValidated
+                        }
+                    });
+                }
+                else
+                {
+                    // Si no se encontró el usuario o no hay sesión activa
+                    Console.WriteLine("Usuario no encontrado o sesión no válida.");
+                    return Unauthorized(new { error = "Correo o contraseña incorrectos." });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Hubo un problema al procesar la solicitud: " + ex.Message);
+                return StatusCode(500, new { error = "Hubo un problema al procesar la solicitud. Intenta de nuevo más tarde." });
+            }
+        }
 
         private async Task<GoogleJsonWebSignature.Payload?> VerifyGoogleToken(string token)
         {
@@ -311,27 +467,6 @@ namespace ApiV1Coop.Controllers.auth
                 return null;
             }
         }
-
-        // private string GenerateJwtToken(string userId, string email)
-        // {
-        //     var claims = new[] {
-        //         new Claim(ClaimTypes.NameIdentifier, userId),
-        //         new Claim(ClaimTypes.Email, email)
-        //     };
-
-        //     var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSecret));
-        //     var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-        //     var token = new JwtSecurityToken(
-        //         issuer: "http://localhost:5016",
-        //         audience: "http://localhost:4200",
-        //         claims: claims,
-        //         expires: DateTime.Now.AddHours(1),
-        //         signingCredentials: creds
-        //     );
-
-        //     return new JwtSecurityTokenHandler().WriteToken(token);
-        // }
 
         private string GenerateJwtToken(string userId, string email)
         {
@@ -357,133 +492,5 @@ namespace ApiV1Coop.Controllers.auth
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
-
-
     }
 }
-
-
-// using Google.Apis.Auth;
-// using System.IdentityModel.Tokens.Jwt;
-// using System.Security.Claims;
-// using System.Text;
-// using Microsoft.AspNetCore.Http;
-// using Microsoft.AspNetCore.Mvc;
-// using Microsoft.IdentityModel.Tokens;
-
-// namespace ApiV1Coop.Controllers.auth
-// {
-//     [Route("api/auth")]
-//     [ApiController]
-//     public class AuthController : Controller
-//     {
-//         // Obtener las variables de entorno de manera segura
-//         private readonly string _jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") ?? "default-jwt-secret"; // Clave secreta para JWT
-//         private readonly string _googleClientId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID") ?? "default-google-client-id"; // Client ID de Google
-
-//         [HttpPost("google")]
-//         public async Task<IActionResult> GoogleLogin()
-//         {
-//             // Obtener el token del encabezado Authorization
-//             var authorizationHeader = Request.Headers["Authorization"].ToString();
-//             Console.WriteLine("Token recibido en el backend: " + authorizationHeader);
-
-//             if (string.IsNullOrEmpty(authorizationHeader) || !authorizationHeader.StartsWith("Bearer "))
-//             {
-//                 return BadRequest(new { error = "El encabezado Authorization es requerido y debe contener el token de Google." });
-//             }
-
-//             // Extraer el token después de "Bearer "
-//             var googleToken = authorizationHeader.Substring("Bearer ".Length).Trim();
-//             Console.WriteLine("Token sin prefijo: " + googleToken);
-
-//             try
-//             {
-//                 // Verificar el token con Google
-//                 var payload = await VerifyGoogleToken(googleToken);
-//                 if (payload == null)
-//                 {
-//                     Console.WriteLine("Token de Google inválido.");
-//                     return Unauthorized(new { error = "Token de Google inválido." });
-//                 }
-
-//                 // Simular datos quemados o procesar la lógica de negocio real
-//                 var response = new
-//                 {
-//                     data = new[]
-//                     {
-//                         new
-//                         {
-//                             type = "usuarios",
-//                             id = "123456789", // ID quemado
-//                             attributes = new
-//                             {
-//                                 usuario_id = "123456789", // ID quemado
-//                                 googleId = payload.Subject,
-//                                 name = payload.Name,
-//                                 email = payload.Email,
-//                                 picture = payload.Picture,
-//                                 token = GenerateJwtToken(payload.Subject, payload.Email) // Generar el token JWT
-//                             }
-//                         }
-//                     }
-//                 };
-
-//                 Console.WriteLine("Respuesta generada en el backend: " + System.Text.Json.JsonSerializer.Serialize(response));
-//                 return Ok(response);
-//             }
-//             catch (Exception ex)
-//             {
-//                 Console.WriteLine("Error al procesar el token: " + ex.Message);
-//                 return BadRequest(new { error = ex.Message });
-//             }
-//         }
-
-
-
-//         [HttpGet("test")]
-//         public IActionResult TestConnection()
-//         {
-//             return Ok(new { message = "Conexión exitosa" });
-//         }
-
-//         private async Task<GoogleJsonWebSignature.Payload?> VerifyGoogleToken(string token)
-//         {
-//             var settings = new GoogleJsonWebSignature.ValidationSettings
-//             {
-//                 Audience = new List<string> { _googleClientId } // Usamos el client ID de Google de las variables de entorno
-//             };
-
-//             try
-//             {
-//                 var payload = await GoogleJsonWebSignature.ValidateAsync(token, settings);
-//                 return payload;
-//             }
-//             catch
-//             {
-//                 return null;
-//             }
-//         }
-
-//         private string GenerateJwtToken(string userId, string email)
-//         {
-//             var claims = new[] {
-//                 new Claim(ClaimTypes.NameIdentifier, userId),
-//                 new Claim(ClaimTypes.Email, email)
-//             };
-
-//             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSecret)); // Usamos el JWT secreto de las variables de entorno
-//             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-//             var token = new JwtSecurityToken(
-//                 issuer: "http://localhost:5016",
-//                 audience: "http://localhost:4200",
-//                 claims: claims,
-//                 expires: DateTime.Now.AddHours(1),
-//                 signingCredentials: creds
-//             );
-
-//             return new JwtSecurityTokenHandler().WriteToken(token);
-//         }
-//     }
-// }
