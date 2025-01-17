@@ -342,11 +342,11 @@ namespace ApiV1Coop.Controllers.auth
                 }
 
                 // Ejecutar la consulta de sesión activa
-                var sessionReader = await checkSessionCommand.ExecuteReaderAsync();
-                if (await sessionReader.ReadAsync())
-                {
-                    return BadRequest(new { error = "El usuario ya tiene una sesión activa." });
-                }
+                // var sessionReader = await checkSessionCommand.ExecuteReaderAsync();
+                // if (await sessionReader.ReadAsync())
+                // {
+                //     return BadRequest(new { error = "El usuario ya tiene una sesión activa." });
+                // }
 
                 // Consulta SQL para validar el usuario con el correo y la contraseña
                 var query = @"
