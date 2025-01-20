@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using ApiV1Coop.Models;
+using ApiV1Coop.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Data.SqlClient;
 using Microsoft.Data.SqlClient;
@@ -136,6 +137,8 @@ namespace ApiV1Coop.Controllers.auth
                     return BadRequest(new { error = "Ya existe un usuario con este correo." });
                 }
 
+                var optCode = new Random().Next(100000, 999999);
+
                 // Crear un nuevo usuario
                 var newUser = new Usuario
                 {
@@ -150,6 +153,12 @@ namespace ApiV1Coop.Controllers.auth
                 _dbContext.Usuarios.Add(newUser);
                 await _dbContext.SaveChangesAsync();
 
+                var mailSender = new MailSenderSmtp();
+                var subject = "Código de confirmacion de autenticación";
+                var body = $"Hola {newUser.Nombre}, este es tu código de verificación, por favor ingresa este codigo en el formulario de verificacion: {optCode}";
+
+                await mailSender.SendEmailAsync(newUser.Correo, subject, body);
+
                 // Retornar respuesta con el token JWT
                 return Ok(new
                 {
@@ -160,7 +169,7 @@ namespace ApiV1Coop.Controllers.auth
                         id = newUser.Id,
                         name = newUser.Nombre,
                         email = newUser.Correo,
-                        opt_code = 123123,
+                        opt_code = optCode,
                         is_validated = false
                     }
                 });
@@ -325,15 +334,14 @@ namespace ApiV1Coop.Controllers.auth
 
                 // Consulta SQL para verificar si ya hay una sesión activa
                 var checkSessionQuery = @"
-                    SELECT TOP(1) [SessionToken]
+                    SELECT TOP(1) [SessionToken], [ExpirationTime], [UserId]
                     FROM [Sessions]
                     WHERE [UserId] = (SELECT [Id] FROM [Usuarios] WHERE [correo] = @correo)
-                    AND [ExpirationTime] > @currentTime";
+                    ORDER BY [ExpirationTime] DESC"; // Ordenamos para obtener la sesión más reciente
 
                 var checkSessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
                 checkSessionCommand.CommandText = checkSessionQuery;
                 checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@correo", request.Email));
-                checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@currentTime", DateTime.UtcNow));
 
                 // Abrir la conexión de base de datos
                 if (checkSessionCommand.Connection.State != System.Data.ConnectionState.Open)
@@ -342,18 +350,21 @@ namespace ApiV1Coop.Controllers.auth
                 }
 
                 // Ejecutar la consulta de sesión activa
-                // var sessionReader = await checkSessionCommand.ExecuteReaderAsync();
-                // if (await sessionReader.ReadAsync())
-                // {
-                //     return BadRequest(new { error = "El usuario ya tiene una sesión activa." });
-                // }
+                var sessionReader = await checkSessionCommand.ExecuteReaderAsync();
+                string sessionToken = null;
+                DateTime? sessionExpirationTime = null;
+
+                if (await sessionReader.ReadAsync())
+                {
+                    sessionToken = sessionReader["SessionToken"] as string;
+                    sessionExpirationTime = sessionReader["ExpirationTime"] as DateTime?;
+                }
 
                 // Consulta SQL para validar el usuario con el correo y la contraseña
                 var query = @"
                     SELECT TOP(1) [u].[Id], [u].[correo], [u].[google_token], [u].[is_validated], [u].[jwt_token], 
-                                [u].[nombre], [u].[password], [u].[picture], s.[ExpirationTime]
+                                [u].[nombre], [u].[password], [u].[picture]
                     FROM [Usuarios] AS [u]
-                    LEFT JOIN [Sessions] AS s ON s.[UserId] = u.[Id]
                     WHERE [u].[correo] = @correo AND [u].[password] = @password";
 
                 var command = _dbContext.Database.GetDbConnection().CreateCommand();
@@ -374,28 +385,12 @@ namespace ApiV1Coop.Controllers.auth
 
                 if (await reader.ReadAsync())
                 {
-                    var expirationTime = reader["ExpirationTime"] as DateTime?;
-
-                    // Verificar si la sesión ha expirado
-                    // if (expirationTime.HasValue && expirationTime.Value < TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"))
-                    // {
-                    //     return Unauthorized(new { error = "El token de sesión ha expirado." });
-                    // }
-
-                    // Validar si el usuario ha sido verificado
-                    var isValidated = reader["is_validated"] as bool? ?? false;
-                    if (!isValidated)
-                    {
-                        return Unauthorized(new { error = "El usuario no ha sido validado." });
-                    }
-
-                    // Obtener los datos del usuario
                     var foundUser = new
                     {
                         Id = reader["Id"],
                         Correo = reader["correo"],
                         GoogleToken = reader["google_token"],
-                        IsValidated = isValidated,
+                        IsValidated = reader["is_validated"] as bool? ?? false,
                         JwtToken = reader["jwt_token"],
                         Nombre = reader["nombre"],
                         Password = reader["password"],
@@ -404,11 +399,41 @@ namespace ApiV1Coop.Controllers.auth
 
                     Console.WriteLine("USUARIO ENCONTRADO: " + foundUser);
 
-                    // Aquí puedes generar un token de sesión nuevo, si es necesario
-                    var sessionToken = Guid.NewGuid().ToString();
-                    var expirationTimeNew = DateTime.UtcNow.AddMinutes(1); // Para pruebas: el token expira en 1 minuto
+                    // Verificar si ya existe una sesión activa
+                    if (sessionToken != null)
+                    {
+                        // Si la sesión activa no ha expirado
+                        if (sessionExpirationTime.HasValue && sessionExpirationTime.Value > TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"))
+                        {
+                            return Ok(new
+                            {
+                                message = "Sesión activa encontrada.",
+                                session_token = sessionToken,
+                                expiration_time = sessionExpirationTime.Value,
+                                user = new
+                                {
+                                    id = foundUser.Id,
+                                    nombre = foundUser.Nombre,
+                                    correo = foundUser.Correo,
+                                    is_validated = foundUser.IsValidated
+                                }
+                            });
+                        }
+                        else
+                        {
+                            // Si la sesión ha expirado, eliminamos la sesión vieja
+                            var deleteSessionQuery = "DELETE FROM [Sessions] WHERE [SessionToken] = @sessionToken";
+                            var deleteSessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
+                            deleteSessionCommand.CommandText = deleteSessionQuery;
+                            deleteSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", sessionToken));
+                            await deleteSessionCommand.ExecuteNonQueryAsync();
+                        }
+                    }
 
-                    // Crear una nueva sesión en la base de datos
+                    // Crear una nueva sesión
+                    var sessionTokenNew = Guid.NewGuid().ToString();
+                    var expirationTimeNew = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador").AddMinutes(30); // Nuevo tiempo de expiración
+
                     var sessionQuery = @"
                         INSERT INTO [Sessions] ([CreatedAt], [ExpirationTime], [SessionToken], [UserId])
                         VALUES (@createdAt, @expirationTime, @sessionToken, @userId)";
@@ -416,17 +441,17 @@ namespace ApiV1Coop.Controllers.auth
                     var sessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
                     sessionCommand.CommandText = sessionQuery;
                     sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@createdAt", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador")));
-                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@expirationTime", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddHours(1), "America/El_Salvador")));
-                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", sessionToken));
+                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@expirationTime", expirationTimeNew));
+                    sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", sessionTokenNew));
                     sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@userId", foundUser.Id));
 
                     await sessionCommand.ExecuteNonQueryAsync();
 
                     return Ok(new
                     {
-                        message = "Usuario validado y sesión creada exitosamente.",
-                        session_token = sessionToken,
-                        expiration_time = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddMinutes(1), "America/El_Salvador"),
+                        message = "Usuario validado y nueva sesión creada.",
+                        session_token = sessionTokenNew,
+                        expiration_time = expirationTimeNew,
                         user = new
                         {
                             id = foundUser.Id,
@@ -438,8 +463,7 @@ namespace ApiV1Coop.Controllers.auth
                 }
                 else
                 {
-                    // Si no se encontró el usuario o no hay sesión activa
-                    Console.WriteLine("Usuario no encontrado o sesión no válida.");
+                    // Si no se encontró el usuario o la contraseña es incorrecta
                     return Unauthorized(new { error = "Correo o contraseña incorrectos." });
                 }
             }
@@ -449,6 +473,148 @@ namespace ApiV1Coop.Controllers.auth
                 return StatusCode(500, new { error = "Hubo un problema al procesar la solicitud. Intenta de nuevo más tarde." });
             }
         }
+
+        // [HttpPost("login")]
+        // public async Task<IActionResult> Login([FromBody] LoginRequest request)
+        // {
+        //     // Validar que ambos parámetros están presentes
+        //     if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
+        //     {
+        //         return BadRequest(new { error = "El correo y la contraseña son obligatorios." });
+        //     }
+
+        //     try
+        //     {
+        //         // Imprimir el contenido del request para depuración
+        //         Console.WriteLine("Correo recibido: " + request.Email);
+        //         Console.WriteLine("Contraseña recibida: " + request.Password);
+
+        //         // Consulta SQL para verificar si ya hay una sesión activa
+        //         var checkSessionQuery = @"
+        //             SELECT TOP(1) [SessionToken]
+        //             FROM [Sessions]
+        //             WHERE [UserId] = (SELECT [Id] FROM [Usuarios] WHERE [correo] = @correo)
+        //             AND [ExpirationTime] > @currentTime";
+
+        //         var checkSessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
+        //         checkSessionCommand.CommandText = checkSessionQuery;
+        //         checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@correo", request.Email));
+        //         checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@currentTime", DateTime.UtcNow));
+
+        //         // Abrir la conexión de base de datos
+        //         if (checkSessionCommand.Connection.State != System.Data.ConnectionState.Open)
+        //         {
+        //             await checkSessionCommand.Connection.OpenAsync();
+        //         }
+
+        //         // Ejecutar la consulta de sesión activa
+        //         // var sessionReader = await checkSessionCommand.ExecuteReaderAsync();
+        //         // if (await sessionReader.ReadAsync())
+        //         // {
+        //         //     return BadRequest(new { error = "El usuario ya tiene una sesión activa." });
+        //         // }
+
+        //         // Consulta SQL para validar el usuario con el correo y la contraseña
+        //         var query = @"
+        //             SELECT TOP(1) [u].[Id], [u].[correo], [u].[google_token], [u].[is_validated], [u].[jwt_token], 
+        //                         [u].[nombre], [u].[password], [u].[picture], s.[ExpirationTime]
+        //             FROM [Usuarios] AS [u]
+        //             LEFT JOIN [Sessions] AS s ON s.[UserId] = u.[Id]
+        //             WHERE [u].[correo] = @correo AND [u].[password] = @password";
+
+        //         var command = _dbContext.Database.GetDbConnection().CreateCommand();
+        //         command.CommandText = query;
+
+        //         // Agregar parámetros para evitar inyecciones SQL
+        //         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@correo", request.Email));
+        //         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@password", request.Password));
+
+        //         // Abrir la conexión de base de datos
+        //         if (command.Connection.State != System.Data.ConnectionState.Open)
+        //         {
+        //             await command.Connection.OpenAsync();
+        //         }
+
+        //         // Ejecutar la consulta y leer el resultado
+        //         var reader = await command.ExecuteReaderAsync();
+
+        //         if (await reader.ReadAsync())
+        //         {
+        //             var expirationTime = reader["ExpirationTime"] as DateTime?;
+
+        //             // Verificar si la sesión ha expirado
+        //             if (expirationTime.HasValue && expirationTime.Value < TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"))
+        //             {
+        //                 return Unauthorized(new { error = "El token de sesión ha expirado." });
+        //             }
+
+        //             // Validar si el usuario ha sido verificado
+        //             var isValidated = reader["is_validated"] as bool? ?? false;
+        //             if (!isValidated)
+        //             {
+        //                 return Unauthorized(new { error = "El usuario no ha sido validado." });
+        //             }
+
+        //             // Obtener los datos del usuario
+        //             var foundUser = new
+        //             {
+        //                 Id = reader["Id"],
+        //                 Correo = reader["correo"],
+        //                 GoogleToken = reader["google_token"],
+        //                 IsValidated = isValidated,
+        //                 JwtToken = reader["jwt_token"],
+        //                 Nombre = reader["nombre"],
+        //                 Password = reader["password"],
+        //                 Picture = reader["picture"]
+        //             };
+
+        //             Console.WriteLine("USUARIO ENCONTRADO: " + foundUser);
+
+        //             // Aquí puedes generar un token de sesión nuevo, si es necesario
+        //             var sessionToken = Guid.NewGuid().ToString();
+        //             var expirationTimeNew = DateTime.UtcNow.AddMinutes(1); // Para pruebas: el token expira en 1 minuto
+
+        //             // Crear una nueva sesión en la base de datos
+        //             var sessionQuery = @"
+        //                 INSERT INTO [Sessions] ([CreatedAt], [ExpirationTime], [SessionToken], [UserId])
+        //                 VALUES (@createdAt, @expirationTime, @sessionToken, @userId)";
+
+        //             var sessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
+        //             sessionCommand.CommandText = sessionQuery;
+        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@createdAt", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador")));
+        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@expirationTime", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddHours(1), "America/El_Salvador")));
+        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", sessionToken));
+        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@userId", foundUser.Id));
+
+        //             await sessionCommand.ExecuteNonQueryAsync();
+
+        //             return Ok(new
+        //             {
+        //                 message = "Usuario validado y sesión creada exitosamente.",
+        //                 session_token = sessionToken,
+        //                 expiration_time = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddMinutes(1), "America/El_Salvador"),
+        //                 user = new
+        //                 {
+        //                     id = foundUser.Id,
+        //                     nombre = foundUser.Nombre,
+        //                     correo = foundUser.Correo,
+        //                     is_validated = foundUser.IsValidated
+        //                 }
+        //             });
+        //         }
+        //         else
+        //         {
+        //             // Si no se encontró el usuario o no hay sesión activa
+        //             Console.WriteLine("Usuario no encontrado o sesión no válida.");
+        //             return Unauthorized(new { error = "Correo o contraseña incorrectos." });
+        //         }
+        //     }
+        //     catch (Exception ex)
+        //     {
+        //         Console.WriteLine("Hubo un problema al procesar la solicitud: " + ex.Message);
+        //         return StatusCode(500, new { error = "Hubo un problema al procesar la solicitud. Intenta de nuevo más tarde." });
+        //     }
+        // }
 
         private async Task<GoogleJsonWebSignature.Payload?> VerifyGoogleToken(string token)
         {
