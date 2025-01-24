@@ -128,6 +128,8 @@ namespace ApiV1Coop.Controllers.auth
             if (string.IsNullOrEmpty(request.Password))
                 return BadRequest(new { error = "El campo 'password' es obligatorio." });
 
+            Console.WriteLine("Correo recibido: " +request.Correo);
+
             try
             {
                 // Verificar si ya existe un usuario con el mismo correo
