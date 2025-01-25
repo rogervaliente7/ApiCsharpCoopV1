@@ -23,7 +23,7 @@ namespace ApiV1Coop.Services
                     From = new MailAddress(_senderEmail),
                     Subject = subject,
                     Body = body,
-                    IsBodyHtml = false // Cambia a true si el cuerpo contiene HTML
+                    IsBodyHtml = true // Indica que el cuerpo contiene HTML
                 };
 
                 mailMessage.To.Add(recipientEmail);

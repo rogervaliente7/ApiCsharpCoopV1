@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f7fa;
+            color: #333;
+        }
+        .email-container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .email-header {
+            background-color: #1a73e8;
+            padding: 20px;
+            text-align: center;
+            color: #ffffff;
+        }
+        .email-header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .email-content {
+            padding: 20px;
+        }
+        .email-content h2 {
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+        .email-content p {
+            margin: 10px 0;
+            line-height: 1.6;
+        }
+        .otp-code {
+            display: block;
+            background-color: #f1f3f4;
+            border-radius: 5px;
+            padding: 10px 20px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #1a73e8;
+            margin: 20px auto;
+            text-align: center;
+            width: fit-content;
+        }
+        .email-footer {
+            padding: 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #999;
+            background-color: #f1f3f4;
+        }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        <div class="email-header">
+            <h1>Tu Código de Verificación</h1>
+        </div>
+        <div class="email-content">
+            <h2>Hola, {Nombre}</h2>
+            <p>Este es tu código de verificación para continuar con tu registro:</p>
+            <div class="otp-code">{optCode}</div>
+            <p>Por favor, ingresa este código en el formulario de verificación para completar el proceso.</p>
+            <p>Si no solicitaste este código, puedes ignorar este correo de manera segura.</p>
+        </div>
+        <div class="email-footer">
+            &copy; 2025 TuEmpresa. Todos los derechos reservados.<br>
+            Este correo fue enviado automáticamente, por favor no respondas.
+        </div>
+    </div>
+</body>
+</html>

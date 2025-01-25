@@ -155,11 +155,35 @@ namespace ApiV1Coop.Controllers.auth
                 _dbContext.Usuarios.Add(newUser);
                 await _dbContext.SaveChangesAsync();
 
-                var mailSender = new MailSenderSmtp();
-                var subject = "Código de confirmacion de autenticación";
-                var body = $"Hola {newUser.Nombre}, este es tu código de verificación, por favor ingresa este codigo en el formulario de verificacion: {optCode}";
+                //var mailSender = new MailSenderSmtp();
+                //var templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Templates", "opt_email_template.html");
+                //var templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Templates", "opt_email_template.html");
 
-                await mailSender.SendEmailAsync(newUser.Correo, subject, body);
+                //var htmlTemplate = System.IO.File.ReadAllText(templatePath);
+
+                var mailSender = new MailSenderSmtp();
+                var templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Templates", "opt_email_template.html");
+
+                string htmlTemplate; // Declara la variable fuera del try
+
+                try
+                {
+                    htmlTemplate = System.IO.File.ReadAllText(templatePath); // Asigna el valor dentro del try
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error al leer la plantilla: {ex.Message}");
+                    throw;
+                }
+
+                // Reemplazar los marcadores con los datos dinámicos
+                var htmlBody = htmlTemplate.Replace("{Nombre}", newUser.Nombre)
+                                        .Replace("{optCode}", optCode.ToString());
+                
+                var subject = "Código de confirmación de autenticación";
+
+
+                await mailSender.SendEmailAsync(newUser.Correo, subject, htmlBody);
 
                 // Retornar respuesta con el token JWT
                 return Ok(new
