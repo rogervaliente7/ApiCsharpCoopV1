@@ -4,8 +4,8 @@ namespace ApiV1Coop.Models
 {
     public class SignupRequest
     {
-        public string Correo { get; set; }
-        public string Nombre { get; set; }
-        public string Password { get; set; }
+        public required string Correo { get; set; }
+        public required string Nombre { get; set; }
+        public required string Password { get; set; }
     }
 }

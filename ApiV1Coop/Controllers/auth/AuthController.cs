@@ -26,6 +26,12 @@ namespace ApiV1Coop.Controllers.auth
             _dbContext = dbContext; // Inicializar el contexto de la base de datos
         }
 
+        [HttpGet("test")]
+        public IActionResult TestConnection()
+        {
+            return Ok(new { message = "Conexión exitosa" });
+        }
+
         [HttpPost("google")]
         public async Task<IActionResult> GoogleLogin()
         {
@@ -118,74 +124,48 @@ namespace ApiV1Coop.Controllers.auth
         [HttpPost("signup")]
         public async Task<IActionResult> Signup([FromBody] SignupRequest request)
         {
-            // Validar que todos los campos requeridos estén presentes
             if (string.IsNullOrEmpty(request.Correo))
                 return BadRequest(new { error = "El campo 'correo' es obligatorio." });
-            
+
             if (string.IsNullOrEmpty(request.Nombre))
                 return BadRequest(new { error = "El campo 'nombre' es obligatorio." });
 
             if (string.IsNullOrEmpty(request.Password))
                 return BadRequest(new { error = "El campo 'password' es obligatorio." });
 
-            Console.WriteLine("Correo recibido: " +request.Correo);
+            Console.WriteLine("Correo recibido: " + request.Correo);
 
             try
             {
-                // Verificar si ya existe un usuario con el mismo correo
                 var existingUser = _dbContext.Usuarios.FirstOrDefault(u => u.Correo == request.Correo);
                 if (existingUser != null)
                 {
                     return BadRequest(new { error = "Ya existe un usuario con este correo." });
                 }
 
-                var optCode = new Random().Next(100000, 999999);
+                var optCode = new Random().Next(100000, 999999); // Generar código OPT
 
-                // Crear un nuevo usuario
                 var newUser = new Usuario
                 {
                     Nombre = request.Nombre,
                     Correo = request.Correo,
-                    Password = request.Password, // Considera encriptar el password antes de guardarlo
+                    Password = request.Password, // Encripta este valor
                     JwtToken = GenerateJwtToken(Guid.NewGuid().ToString(), request.Correo),
-                    IsValidated = false // Valor predeterminado
+                    IsValidated = false,
+                    OptCode = optCode // Guardar el código OPT
                 };
 
-                // Guardar el usuario en la base de datos
                 _dbContext.Usuarios.Add(newUser);
                 await _dbContext.SaveChangesAsync();
 
-                //var mailSender = new MailSenderSmtp();
-                //var templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Templates", "opt_email_template.html");
-                //var templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Templates", "opt_email_template.html");
-
-                //var htmlTemplate = System.IO.File.ReadAllText(templatePath);
-
+                // Enviar el correo con el código OPT
                 var mailSender = new MailSenderSmtp();
                 var templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Resources", "Templates", "opt_email_template.html");
-
-                string htmlTemplate; // Declara la variable fuera del try
-
-                try
-                {
-                    htmlTemplate = System.IO.File.ReadAllText(templatePath); // Asigna el valor dentro del try
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error al leer la plantilla: {ex.Message}");
-                    throw;
-                }
-
-                // Reemplazar los marcadores con los datos dinámicos
+                var htmlTemplate = System.IO.File.ReadAllText(templatePath);
                 var htmlBody = htmlTemplate.Replace("{Nombre}", newUser.Nombre)
                                         .Replace("{optCode}", optCode.ToString());
-                
-                var subject = "Código de confirmación de autenticación";
+                await mailSender.SendEmailAsync(newUser.Correo, "Código de confirmación de autenticación", htmlBody);
 
-
-                await mailSender.SendEmailAsync(newUser.Correo, subject, htmlBody);
-
-                // Retornar respuesta con el token JWT
                 return Ok(new
                 {
                     message = "Solicitud creada exitosamente",
@@ -195,14 +175,13 @@ namespace ApiV1Coop.Controllers.auth
                         id = newUser.Id,
                         name = newUser.Nombre,
                         email = newUser.Correo,
-                        opt_code = optCode,
-                        is_validated = false
+                        is_validated = false,
+                        opt_code = optCode
                     }
                 });
             }
             catch (Exception ex)
             {
-                // Manejo de errores genéricos
                 Console.WriteLine("Error al procesar la solicitud de signup: " + ex.Message);
                 return StatusCode(500, new { error = "Ocurrió un error interno. Por favor, intenta nuevamente." });
             }
@@ -213,58 +192,61 @@ namespace ApiV1Coop.Controllers.auth
         {
             if (string.IsNullOrEmpty(request.JwtToken) || string.IsNullOrEmpty(request.OptCode))
             {
-                return BadRequest(new { error = "El JwtToken y el optCode son obligatorios." });
+                return BadRequest(new { error = "El JwtToken y el OptCode son obligatorios." });
             }
 
             try
             {
-                // Consulta SQL personalizada usando FromSqlRaw
                 var query = @"
                     SELECT TOP(1) [u].[Id], [u].[correo], [u].[google_token], [u].[is_validated], [u].[jwt_token], 
-                                [u].[nombre], [u].[password], [u].[picture]
+                                [u].[nombre], [u].[password], [u].[picture], [u].[opt_code]
                     FROM [Usuarios] AS [u]
                     WHERE [u].[jwt_token] = {0}";
 
-                var found_user = await _dbContext.Usuarios
+                var foundUser = await _dbContext.Usuarios
                     .FromSqlRaw(query, request.JwtToken)
                     .FirstOrDefaultAsync();
 
-                if (found_user == null)
+                if (foundUser == null)
                 {
                     return BadRequest(new { error = "Usuario no encontrado o ya validado." });
                 }
 
-                // Actualizar el campo is_validated
-                found_user.IsValidated = true;
-                _dbContext.Usuarios.Update(found_user);
+                // Validar el OptCode
+               if (foundUser.OptCode != null && foundUser.OptCode != Convert.ToInt32(request.OptCode))
+                {
+                    return Unauthorized(new { error = "El código OPT proporcionado es incorrecto." });
+                }
+
+                // Marcar como validado
+                foundUser.IsValidated = true;
+                _dbContext.Usuarios.Update(foundUser);
                 await _dbContext.SaveChangesAsync();
 
-                // Crear una nueva sesión para el usuario
-                var sessionToken = Guid.NewGuid().ToString();  // Generar un token único para la sesión
-                var expirationTime = DateTime.UtcNow.AddHours(1);  // La sesión expira en 1 hora (ajustable)
+                var sessionToken = Guid.NewGuid().ToString();
+                var expirationTime = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador").AddMinutes(30);
 
                 var session = new Session
                 {
-                    UserId = found_user.Id,
+                    UserId = foundUser.Id,
                     SessionToken = sessionToken,
                     ExpirationTime = expirationTime
                 };
-                
+
                 _dbContext.Sessions.Add(session);
                 await _dbContext.SaveChangesAsync();
 
-                return Ok(new 
-                { 
+                return Ok(new
+                {
                     message = "Usuario validado exitosamente.",
                     session_token = session.SessionToken,
                     expiration_time = session.ExpirationTime,
                     user = new
                     {
-                        id = found_user.Id,
-                        name = found_user.Nombre,
-                        email = found_user.Correo,
-                        opt_code = 123123,  // Aquí puedes asignar un código de validación si lo deseas
-                        is_validated = found_user.IsValidated
+                        id = foundUser.Id,
+                        name = foundUser.Nombre,
+                        email = foundUser.Correo,
+                        is_validated = foundUser.IsValidated
                     }
                 });
             }
@@ -310,7 +292,7 @@ namespace ApiV1Coop.Controllers.auth
 
                 // Crear una nueva sesión para el usuario
                 var sessionToken = Guid.NewGuid().ToString();  // Generar un token único para la sesión
-                var expirationTime = DateTime.UtcNow.AddHours(1);  // La sesión expira en 1 hora (ajustable)
+                var expirationTime = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador").AddMinutes(30);  // La sesión expira en media hora (ajustable)
 
                 var session = new Session
                 {
@@ -500,147 +482,66 @@ namespace ApiV1Coop.Controllers.auth
             }
         }
 
-        // [HttpPost("login")]
-        // public async Task<IActionResult> Login([FromBody] LoginRequest request)
-        // {
-        //     // Validar que ambos parámetros están presentes
-        //     if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
-        //     {
-        //         return BadRequest(new { error = "El correo y la contraseña son obligatorios." });
-        //     }
+        [HttpPost("logout")]
+        public async Task<IActionResult> Logout([FromBody] LogoutRequest request)
+        {
+            try
+            {
+                // Validar que el sessionToken está presente
+                if (string.IsNullOrEmpty(request.SessionToken))
+                {
+                    return BadRequest(new { error = "El sessionToken es obligatorio." });
+                }
 
-        //     try
-        //     {
-        //         // Imprimir el contenido del request para depuración
-        //         Console.WriteLine("Correo recibido: " + request.Email);
-        //         Console.WriteLine("Contraseña recibida: " + request.Password);
+                // Consulta para buscar la sesión activa
+                var query = @"
+                    SELECT TOP(1) [Id], [ExpirationTime]
+                    FROM [Sessions]
+                    WHERE [SessionToken] = @sessionToken";
 
-        //         // Consulta SQL para verificar si ya hay una sesión activa
-        //         var checkSessionQuery = @"
-        //             SELECT TOP(1) [SessionToken]
-        //             FROM [Sessions]
-        //             WHERE [UserId] = (SELECT [Id] FROM [Usuarios] WHERE [correo] = @correo)
-        //             AND [ExpirationTime] > @currentTime";
+                var command = _dbContext.Database.GetDbConnection().CreateCommand();
+                command.CommandText = query;
+                command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", request.SessionToken));
 
-        //         var checkSessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
-        //         checkSessionCommand.CommandText = checkSessionQuery;
-        //         checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@correo", request.Email));
-        //         checkSessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@currentTime", DateTime.UtcNow));
+                // Abrir la conexión de base de datos
+                if (command.Connection.State != System.Data.ConnectionState.Open)
+                {
+                    await command.Connection.OpenAsync();
+                }
 
-        //         // Abrir la conexión de base de datos
-        //         if (checkSessionCommand.Connection.State != System.Data.ConnectionState.Open)
-        //         {
-        //             await checkSessionCommand.Connection.OpenAsync();
-        //         }
+                // Ejecutar la consulta y verificar si existe la sesión
+                var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                {
+                    return Unauthorized(new { error = "Sesión no encontrada o ya expirada." });
+                }
 
-        //         // Ejecutar la consulta de sesión activa
-        //         // var sessionReader = await checkSessionCommand.ExecuteReaderAsync();
-        //         // if (await sessionReader.ReadAsync())
-        //         // {
-        //         //     return BadRequest(new { error = "El usuario ya tiene una sesión activa." });
-        //         // }
+                // Actualizar el ExpirationTime al tiempo actual para "invalidar" el token
+                reader.Close(); // Cerrar el lector antes de ejecutar otro comando
 
-        //         // Consulta SQL para validar el usuario con el correo y la contraseña
-        //         var query = @"
-        //             SELECT TOP(1) [u].[Id], [u].[correo], [u].[google_token], [u].[is_validated], [u].[jwt_token], 
-        //                         [u].[nombre], [u].[password], [u].[picture], s.[ExpirationTime]
-        //             FROM [Usuarios] AS [u]
-        //             LEFT JOIN [Sessions] AS s ON s.[UserId] = u.[Id]
-        //             WHERE [u].[correo] = @correo AND [u].[password] = @password";
+                var updateQuery = @"
+                    UPDATE [Sessions]
+                    SET [ExpirationTime] = @newExpirationTime
+                    WHERE [SessionToken] = @sessionToken";
 
-        //         var command = _dbContext.Database.GetDbConnection().CreateCommand();
-        //         command.CommandText = query;
+                var updateCommand = _dbContext.Database.GetDbConnection().CreateCommand();
+                updateCommand.CommandText = updateQuery;
+                updateCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@newExpirationTime", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador")));
+                updateCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", request.SessionToken));
 
-        //         // Agregar parámetros para evitar inyecciones SQL
-        //         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@correo", request.Email));
-        //         command.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@password", request.Password));
+                await updateCommand.ExecuteNonQueryAsync();
 
-        //         // Abrir la conexión de base de datos
-        //         if (command.Connection.State != System.Data.ConnectionState.Open)
-        //         {
-        //             await command.Connection.OpenAsync();
-        //         }
-
-        //         // Ejecutar la consulta y leer el resultado
-        //         var reader = await command.ExecuteReaderAsync();
-
-        //         if (await reader.ReadAsync())
-        //         {
-        //             var expirationTime = reader["ExpirationTime"] as DateTime?;
-
-        //             // Verificar si la sesión ha expirado
-        //             if (expirationTime.HasValue && expirationTime.Value < TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"))
-        //             {
-        //                 return Unauthorized(new { error = "El token de sesión ha expirado." });
-        //             }
-
-        //             // Validar si el usuario ha sido verificado
-        //             var isValidated = reader["is_validated"] as bool? ?? false;
-        //             if (!isValidated)
-        //             {
-        //                 return Unauthorized(new { error = "El usuario no ha sido validado." });
-        //             }
-
-        //             // Obtener los datos del usuario
-        //             var foundUser = new
-        //             {
-        //                 Id = reader["Id"],
-        //                 Correo = reader["correo"],
-        //                 GoogleToken = reader["google_token"],
-        //                 IsValidated = isValidated,
-        //                 JwtToken = reader["jwt_token"],
-        //                 Nombre = reader["nombre"],
-        //                 Password = reader["password"],
-        //                 Picture = reader["picture"]
-        //             };
-
-        //             Console.WriteLine("USUARIO ENCONTRADO: " + foundUser);
-
-        //             // Aquí puedes generar un token de sesión nuevo, si es necesario
-        //             var sessionToken = Guid.NewGuid().ToString();
-        //             var expirationTimeNew = DateTime.UtcNow.AddMinutes(1); // Para pruebas: el token expira en 1 minuto
-
-        //             // Crear una nueva sesión en la base de datos
-        //             var sessionQuery = @"
-        //                 INSERT INTO [Sessions] ([CreatedAt], [ExpirationTime], [SessionToken], [UserId])
-        //                 VALUES (@createdAt, @expirationTime, @sessionToken, @userId)";
-
-        //             var sessionCommand = _dbContext.Database.GetDbConnection().CreateCommand();
-        //             sessionCommand.CommandText = sessionQuery;
-        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@createdAt", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador")));
-        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@expirationTime", TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddHours(1), "America/El_Salvador")));
-        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@sessionToken", sessionToken));
-        //             sessionCommand.Parameters.Add(new Microsoft.Data.SqlClient.SqlParameter("@userId", foundUser.Id));
-
-        //             await sessionCommand.ExecuteNonQueryAsync();
-
-        //             return Ok(new
-        //             {
-        //                 message = "Usuario validado y sesión creada exitosamente.",
-        //                 session_token = sessionToken,
-        //                 expiration_time = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(expirationTimeNew.AddMinutes(1), "America/El_Salvador"),
-        //                 user = new
-        //                 {
-        //                     id = foundUser.Id,
-        //                     nombre = foundUser.Nombre,
-        //                     correo = foundUser.Correo,
-        //                     is_validated = foundUser.IsValidated
-        //                 }
-        //             });
-        //         }
-        //         else
-        //         {
-        //             // Si no se encontró el usuario o no hay sesión activa
-        //             Console.WriteLine("Usuario no encontrado o sesión no válida.");
-        //             return Unauthorized(new { error = "Correo o contraseña incorrectos." });
-        //         }
-        //     }
-        //     catch (Exception ex)
-        //     {
-        //         Console.WriteLine("Hubo un problema al procesar la solicitud: " + ex.Message);
-        //         return StatusCode(500, new { error = "Hubo un problema al procesar la solicitud. Intenta de nuevo más tarde." });
-        //     }
-        // }
+                return Ok(new { 
+                    message = "Sesión cerrada exitosamente.",
+                    expirationTime = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador"),
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Hubo un problema al procesar la solicitud: " + ex.Message);
+                return StatusCode(500, new { error = "Hubo un problema al procesar la solicitud. Intenta de nuevo más tarde." });
+            }
+        }
 
         private async Task<GoogleJsonWebSignature.Payload?> VerifyGoogleToken(string token)
         {

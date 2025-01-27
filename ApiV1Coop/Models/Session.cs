@@ -17,7 +17,7 @@ namespace ApiV1Coop.Models
 
         public Session()
         {
-            CreatedAt = DateTime.UtcNow;  // Asignar la fecha de creación cuando se instancie la clase
+            CreatedAt = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "America/El_Salvador");  // Asignar la fecha de creación cuando se instancie la clase
         }
     }
 }

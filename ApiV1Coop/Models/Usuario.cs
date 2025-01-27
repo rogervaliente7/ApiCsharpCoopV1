@@ -29,5 +29,8 @@ namespace ApiV1Coop.Models
 
         [Column("is_validated")]
         public bool IsValidated { get; set; } = false; // Valor predeterminado
+
+        [Column("opt_code")]
+        public int? OptCode { get; set; }
     }
 }
